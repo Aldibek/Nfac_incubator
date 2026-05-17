@@ -41,6 +41,8 @@ export interface MatchState {
   selectedPieceId: string | null
   forcedPieceId: string | null
   winner: Player | null
+  ceremonyId: string | null
+  ceremonyOpen: boolean
   history: MoveRecord[]
   themeId: string
 }

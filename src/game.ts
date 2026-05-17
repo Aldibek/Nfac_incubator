@@ -73,6 +73,8 @@ export function createInitialState(themeId: string): MatchState {
     selectedPieceId: null,
     forcedPieceId: null,
     winner: null,
+    ceremonyId: null,
+    ceremonyOpen: false,
     history: [],
     themeId,
   }

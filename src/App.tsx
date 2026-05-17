@@ -56,6 +56,64 @@ const THEMES = [
   },
 ] as const
 
+interface CeremonyScene {
+  id: string
+  eyebrow: string
+  stamp: string
+  title: string
+  subtitle: string
+  verdict: string
+  ribbons: string[]
+  stickers: string[]
+}
+
+const CEREMONY_SCENES: CeremonyScene[] = [
+  {
+    id: 'royal-roast',
+    eyebrow: 'Royal roast ceremony',
+    stamp: 'CROWN REVOKED',
+    title: 'The throne has moved on.',
+    subtitle:
+      'Tonight the room witnessed a luxurious tactical collapse with premium dramatic timing.',
+    verdict: 'the royal roast committee has collected enough evidence.',
+    ribbons: ['too much confidence', 'not enough defense', 'audience saw everything'],
+    stickers: ['BROKEN CROWN', 'ELITE FUMBLE', 'OOPS'],
+  },
+  {
+    id: 'skill-issue',
+    eyebrow: 'Emergency broadcast',
+    stamp: 'SKILL ISSUE CONFIRMED',
+    title: 'Pride level critically low.',
+    subtitle:
+      'Sensors detected severe diagonal confusion and an immediate shortage of comeback energy.',
+    verdict: 'the tactical support line cannot save this performance anymore.',
+    ribbons: ['critical collapse', 'confidence offline', 'defense unavailable'],
+    stickers: ['404 PRIDE', 'TACTICAL PANIC', 'NO EXCUSES'],
+  },
+  {
+    id: 'award-night',
+    eyebrow: 'Totally serious award show',
+    stamp: 'BEST SUPPORTING LOSER',
+    title: 'A standing ovation for the downfall.',
+    subtitle:
+      'The academy applauds the courage it took to lose this elegantly in front of the whole board.',
+    verdict: 'your acceptance speech has been replaced with respectful silence.',
+    ribbons: ['cinematic defeat', 'dramatic ending', 'memorable downfall'],
+    stickers: ['RED CARPET L', 'OVERSERVED EGO', 'TRY AGAIN STAR'],
+  },
+  {
+    id: 'public-verdict',
+    eyebrow: 'Public verdict protocol',
+    stamp: 'THE BOARD HAS SPOKEN',
+    title: 'Your excuses were denied.',
+    subtitle:
+      'A unanimous panel of invisible spectators agrees: that ending belonged in the group chat.',
+    verdict: 'the court of vibes has delivered its final judgement.',
+    ribbons: ['group chat material', 'caught in 4k', 'comeback denied'],
+    stickers: ['VERDICT FINAL', 'MIC DROP', 'PUBLIC LORE'],
+  },
+]
+
 function App() {
   const [state, setState] = useState<MatchState>(() => loadMatchState())
 
@@ -105,6 +163,16 @@ function App() {
     emberMoves,
     ivoryMoves,
   })
+
+  const winnerMeta = state.winner ? PLAYER_META[state.winner] : null
+  const losingPlayer = state.winner ? getOpponent(state.winner) : null
+  const loserMeta = losingPlayer ? PLAYER_META[losingPlayer] : null
+  const winnerCeremony = state.ceremonyId
+    ? CEREMONY_SCENES.find((scene) => scene.id === state.ceremonyId) ?? null
+    : null
+  const ceremonyIsOpen = Boolean(
+    state.ceremonyOpen && state.winner && winnerMeta && loserMeta && winnerCeremony,
+  )
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
@@ -165,6 +233,7 @@ function App() {
         ? previous.currentPlayer
         : getOpponent(previous.currentPlayer)
       const winner = comboContinues ? null : getWinner(board, nextPlayer)
+      const ceremonyId = winner ? pickCeremonySceneId() : null
 
       return {
         ...previous,
@@ -173,6 +242,8 @@ function App() {
         selectedPieceId: comboContinues ? piece.id : null,
         forcedPieceId: comboContinues ? piece.id : null,
         winner,
+        ceremonyId,
+        ceremonyOpen: Boolean(ceremonyId),
         history: [
           ...previous.history,
           {
@@ -222,13 +293,109 @@ function App() {
     }))
   }
 
-  const winnerMeta = state.winner ? PLAYER_META[state.winner] : null
+  function dismissCeremony() {
+    setState((previous) => ({
+      ...previous,
+      ceremonyOpen: false,
+    }))
+  }
+
   const activeMeta = PLAYER_META[state.currentPlayer]
+  const winnerPieces = state.winner ? pieceCounts[state.winner] : 0
+  const loserPieces = losingPlayer ? pieceCounts[losingPlayer] : 0
+  const winnerKings = state.winner ? kingCounts[state.winner] : 0
+  const loserKings = losingPlayer ? kingCounts[losingPlayer] : 0
 
   return (
-    <div className="app-shell" data-theme={theme.id}>
+    <div
+      className={`app-shell ${ceremonyIsOpen ? 'app-shell--ceremony-open' : ''}`}
+      data-theme={theme.id}
+    >
       <div className="ambient ambient--one" aria-hidden="true"></div>
       <div className="ambient ambient--two" aria-hidden="true"></div>
+
+      {ceremonyIsOpen && winnerCeremony && winnerMeta && loserMeta && losingPlayer ? (
+        <section
+          className={`ceremony-overlay ceremony-overlay--${winnerCeremony.id}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ceremony-title"
+        >
+          <div className="ceremony-haze" aria-hidden="true"></div>
+          <div className="ceremony-spotlight ceremony-spotlight--left" aria-hidden="true"></div>
+          <div className="ceremony-spotlight ceremony-spotlight--right" aria-hidden="true"></div>
+
+          <div className="ceremony-sticker-cloud" aria-hidden="true">
+            {winnerCeremony.stickers.map((sticker) => (
+              <span
+                key={`${winnerCeremony.id}-${sticker}`}
+                className="ceremony-sticker"
+              >
+                {sticker}
+              </span>
+            ))}
+          </div>
+
+          <div className="ceremony-card">
+            <p className="ceremony-eyebrow">{winnerCeremony.eyebrow}</p>
+            <div className="ceremony-stamp">{winnerCeremony.stamp}</div>
+            <h2 id="ceremony-title">{winnerCeremony.title}</h2>
+            <p className="ceremony-subtitle">{winnerCeremony.subtitle}</p>
+
+            <div className="ceremony-verdict">
+              <span className={`player-chip player-chip--${losingPlayer} ceremony-chip`}>
+                {loserMeta.badge}
+              </span>
+              <div>
+                <strong>{`${loserMeta.name}, ${winnerCeremony.verdict}`}</strong>
+                <p>
+                  {`${winnerMeta.name} keeps the crown while the room quietly upgrades your loss into a memorable social event.`}
+                </p>
+              </div>
+            </div>
+
+            <div className="ceremony-stats">
+              <div>
+                <span>Winner pieces</span>
+                <strong>{winnerPieces}</strong>
+              </div>
+              <div>
+                <span>Loser pieces</span>
+                <strong>{loserPieces}</strong>
+              </div>
+              <div>
+                <span>Kings flex</span>
+                <strong>{`${winnerKings}:${loserKings}`}</strong>
+              </div>
+            </div>
+
+            <div className="ceremony-ribbons">
+              {winnerCeremony.ribbons.map((ribbon) => (
+                <span key={`${winnerCeremony.id}-${ribbon}`} className="ceremony-ribbon">
+                  {ribbon}
+                </span>
+              ))}
+            </div>
+
+            <div className="ceremony-actions">
+              <button type="button" className="ghost-button" onClick={dismissCeremony}>
+                Let me breathe
+              </button>
+              <button type="button" className="solid-button" onClick={resetMatch}>
+                Run it back
+              </button>
+            </div>
+          </div>
+
+          <div className="ceremony-marquee" aria-hidden="true">
+            {[...winnerCeremony.ribbons, winnerCeremony.stamp, loserMeta.name, 'group chat gold']
+              .concat([...winnerCeremony.ribbons, winnerCeremony.stamp])
+              .map((item, index) => (
+                <span key={`${winnerCeremony.id}-marquee-${index}`}>{item}</span>
+              ))}
+          </div>
+        </section>
+      ) : null}
 
       <header className="hero-panel">
         <div className="hero-copy">
@@ -462,6 +629,14 @@ function App() {
 }
 
 function loadMatchState(): MatchState {
+  if (import.meta.env.DEV) {
+    const demoState = createCeremonyDemoState()
+
+    if (demoState) {
+      return demoState
+    }
+  }
+
   const fallback = createInitialState(THEMES[0].id)
 
   try {
@@ -483,11 +658,70 @@ function loadMatchState(): MatchState {
       selectedPieceId: parsed.forcedPieceId ?? parsed.selectedPieceId ?? null,
       forcedPieceId: parsed.forcedPieceId ?? null,
       winner: parsed.winner ?? null,
+      ceremonyId:
+        parsed.ceremonyId ?? (parsed.winner ? pickCeremonySceneId() : null),
+      ceremonyOpen: parsed.ceremonyOpen ?? Boolean(parsed.winner),
       history: parsed.history ?? [],
       themeId: parsed.themeId,
     }
   } catch {
     return fallback
+  }
+}
+
+function createCeremonyDemoState(): MatchState | null {
+  const params = new URLSearchParams(window.location.search)
+  const ceremonyId = params.get('ceremony-demo')
+
+  if (!ceremonyId || !CEREMONY_SCENES.some((scene) => scene.id === ceremonyId)) {
+    return null
+  }
+
+  return {
+    board: [
+      [null, { id: 'ivory-1', player: 'ivory', king: false }, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [null, null, null, null, null, null, null, null],
+      [
+        { id: 'ember-1', player: 'ember', king: true },
+        null,
+        { id: 'ember-2', player: 'ember', king: false },
+        null,
+        null,
+        null,
+        null,
+        null,
+      ],
+      [null, null, null, null, null, null, null, null],
+    ],
+    currentPlayer: 'ember',
+    selectedPieceId: null,
+    forcedPieceId: null,
+    winner: 'ember',
+    ceremonyId,
+    ceremonyOpen: true,
+    history: [
+      {
+        id: 'ember-demo-1',
+        player: 'ember',
+        label: 'C3-D4',
+        capture: false,
+        crowned: false,
+        turn: 1,
+      },
+      {
+        id: 'ember-demo-2',
+        player: 'ember',
+        label: 'D4xF6',
+        capture: true,
+        crowned: true,
+        turn: 2,
+      },
+    ],
+    themeId: 'sunset',
   }
 }
 
@@ -559,6 +793,11 @@ function describeStory(context: {
   }
 
   return 'The duel is balanced for now, so positioning and patience matter more than speed.'
+}
+
+function pickCeremonySceneId() {
+  const randomIndex = Math.floor(Math.random() * CEREMONY_SCENES.length)
+  return CEREMONY_SCENES[randomIndex]?.id ?? CEREMONY_SCENES[0].id
 }
 
 export default App
