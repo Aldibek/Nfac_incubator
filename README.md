@@ -1,83 +1,97 @@
 # Crown Lane
 
-`Crown Lane` is a modern checkers web app built as a social product, not just a board.
+`Crown Lane` is a checkers web app made not just as a board game, but as a small social product for friends.
 
-The idea was to keep the technical side around a strong **medium level**, but push the **creativity, product thinking, and presentation** as far as possible. The result is a stylish checkers experience where friends can either play on one screen or send each other a link and continue the duel online.
+I didn’t want to build another “8x8 board and pieces” project. The goal was to take a medium-level technical task and turn it into something with character, emotion, and replay value. That is why this project is built around not only the game itself, but also around the feeling of the match: series format, playing by link, playful tension, and a memorable ending for the loser.
 
-## What I built
+## What this project is
 
-- Full 8x8 checkers rules in React:
-  - diagonal movement
-  - mandatory captures
-  - multi-capture chains
-  - king promotion
-  - winner detection
+At its core, `Crown Lane` is a modern checkers experience where two people can:
+
+- play together on one screen
+- send a link and continue the duel from two different browsers
+- choose how many wins are needed in the series
+- add fun custom dares before the match
+- get a random challenge for the loser after the full series is over
+
+So the product is not only about “who won the board”, but also about what happens around the game.
+
+## Why this project is worth choosing
+
+I think this project stands out for a few simple reasons.
+
+First, it has a clear identity.  
+This is not a generic checkers clone. It feels closer to a party game or a social ritual between friends.
+
+Second, it is easy to understand immediately.  
+You open it and the concept is obvious: play, compete, roast, challenge, rematch.
+
+Third, it creates emotion.  
+Many student projects technically work, but they do not create tension, fun, or a reason to come back. Here, even the loser experience becomes part of the product.
+
+Fourth, it already feels like something people could actually use.  
+Playing by link, series mode, custom dares, and mobile-friendly layout make it more than a demo board.
+
+Fifth, it is balanced well.  
+I did not overcomplicate the technical side just for the sake of complexity. Instead, I focused on building a product that is complete, understandable, and memorable.
+
+## What already works
+
+- Full basic checkers rules
+- Mandatory captures
+- Multi-capture sequences
+- King promotion
+- Winner detection
 - Local 2-player mode on one device
-- Online `duel by link` mode:
-  - create a room
-  - send the URL to a friend
-  - play the same match from two browsers
-- Custom series format:
-  - players choose how many wins are needed
-  - the board resets between rounds
-  - the score of the series stays
-- `Dare vault`:
-  - built-in funny challenges
-  - custom dares written by players
-  - random challenge for the loser after the whole series
-- Cinematic loser ceremony with animated roast screens
-- Move history feed
+- Online mode by shared link
+- Series format with custom target wins
+- Custom dare system for the loser
+- Built-in challenge pool
+- Animated loser ceremony
+- Match history
 - Theme switching
 - Auto-save with `localStorage`
 - Responsive layout for desktop and mobile
 
-## Product idea
+## Who this product is for
 
-This is not “just checkers”.
+`Crown Lane` is for people who do not want a dry board game UI.
 
-`Crown Lane` turns the match into a small social ritual:
+It is especially good for:
 
-- play face-to-face on one device
-- or send a link and play remotely
-- make the series feel dramatic
-- make losing memorable through roast screens and random dares
+- friends playing for fun
+- students playing quick duels between tasks
+- people who want a light competitive experience without accounts or long setup
+- judges who want to see product thinking, not only raw logic
 
-The product is aimed at friends, classmates, siblings, and casual players who want something more playful and memorable than a plain board.
+## Why it has product value
 
-## Why it is valuable
+A lot of checkers projects stop at “the game is technically playable.”
 
-Most beginner checkers projects prove only that the rules work.
+I wanted to go one step further and answer a different question:
 
-This project tries to prove something bigger:
+`Why would someone choose this one instead of any other board on the internet?`
 
-- the game logic works correctly
-- the product has a clear personality
-- the experience is designed for replay value
-- the app already hints at a niche: `party checkers with consequences`
+My answer was:
 
-That makes it feel closer to a real product prototype than to a standard coursework assignment.
+- because it has personality
+- because it is fun with friends
+- because it has a reason to replay
+- because it is easy to share
+- because it feels like an actual product, not a homework screen
 
-## Multiplayer note
+The social layer is what makes the difference here.  
+The match is more dramatic, the result is more memorable, and the project has a clearer niche: `checkers for friends with consequences`.
 
-The online mode uses browser-based peer-to-peer room syncing, so the app can stay deployed as a static site on GitHub Pages while still supporting `play by link`.
+## What I intentionally did not do
 
-Current room model:
+I did not try to overload the project with heavy backend architecture, accounts, or unnecessary complexity.
 
-- 1 host
-- 1 guest
-- host controls room setup, theme, and dare settings
-- both players share the same live match state
+That was a conscious choice.
 
-## Rules note
+The goal was to keep the technical part at a solid medium level, but push creativity, product thinking, UX, and uniqueness much further. I think this makes the project stronger for this brief, because it shows not only coding ability, but also taste, prioritization, and understanding of what makes people remember a product.
 
-This prototype uses a practical 8x8 ruleset:
-
-- regular pieces move diagonally forward
-- captures are mandatory
-- capture chains continue with the same piece
-- kings move one square diagonally in any direction
-
-## Tech stack
+## Stack
 
 - React
 - TypeScript
@@ -99,21 +113,13 @@ npm run dev
 npm run build
 ```
 
-## Submission links
+## Links
 
 - Live project: [https://aldibek.github.io/Nfac_incubator/](https://aldibek.github.io/Nfac_incubator/)
 - GitHub repository: [https://github.com/Aldibek/Nfac_incubator](https://github.com/Aldibek/Nfac_incubator)
 
-## Why this project fits the brief
+## Final note
 
-The brief asked for a product that stands out instead of repeating what already exists.
+If I had to describe this project in one sentence, I would put it like this:
 
-`Crown Lane` does that by combining:
-
-- medium-level but complete gameplay logic
-- strong visual identity
-- social mechanics
-- replayable best-of-series flow
-- a unique “loser challenge” angle
-
-It is intentionally not overengineered, but it still feels like something that could grow into a real service.
+`Crown Lane` is a stylish social checkers app where the game matters, but the experience around the game matters just as much.
