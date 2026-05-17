@@ -14,7 +14,13 @@ import {
   getWinner,
   isDarkSquare,
 } from './game'
-import type { MatchState, MoveOption, Player } from './types'
+import type {
+  MatchState,
+  MoveOption,
+  Player,
+  WishMode,
+  WishSource,
+} from './types'
 
 const STORAGE_KEY = 'crown-lane-checkers'
 
@@ -55,6 +61,42 @@ const THEMES = [
     note: 'Dark editorial mode for dramatic matches.',
   },
 ] as const
+
+const HOUSE_WISHES = [
+  'Сними 10-секундную сторис как будто ты супер-уверенный motivational speaker.',
+  'Запиши voice-сообщение другу в стиле спортивного комментатора.',
+  'Скажи три пафосных фразы как будто проиграл финал чемпионата мира.',
+  'Сними мини-обзор на ближайший предмет так, будто это luxury product.',
+  'Сделай 15-секундный pitch своей самой странной бизнес-идеи.',
+  'Отправь другу один максимально драматичный комплимент.',
+  'Сними короткое видео “мой comeback arc начнется завтра”.',
+  'Изобрази победную речь, хотя именно ты проиграл.',
+  'Придумай слоган для своей игры в шашки и произнеси его вслух.',
+  'Сделай селфи с лицом “я точно все контролировал”.',
+  'Запиши 5 секунд, где ты смотришь в камеру и говоришь “the board remembers”.',
+  'Объясни свое поражение так, будто это был гениальный стратегический план.',
+] as const
+
+const WISH_MODE_META: Record<
+  WishMode,
+  {
+    label: string
+    description: string
+  }
+> = {
+  house: {
+    label: 'House',
+    description: 'Только встроенные кринжовые и прикольные задания.',
+  },
+  mixed: {
+    label: 'Mixed',
+    description: 'Смешиваем фирменные задания проекта и ваши личные.',
+  },
+  custom: {
+    label: 'Custom',
+    description: 'Только ваши собственные желания из challenge vault.',
+  },
+}
 
 interface CeremonyScene {
   id: string
@@ -114,8 +156,14 @@ const CEREMONY_SCENES: CeremonyScene[] = [
   },
 ]
 
+interface WishChoice {
+  source: WishSource
+  text: string
+}
+
 function App() {
   const [state, setState] = useState<MatchState>(() => loadMatchState())
+  const [customWishDraft, setCustomWishDraft] = useState('')
 
   const theme = THEMES.find((entry) => entry.id === state.themeId) ?? THEMES[0]
   const availableMoves = useMemo(
@@ -167,6 +215,8 @@ function App() {
   const winnerMeta = state.winner ? PLAYER_META[state.winner] : null
   const losingPlayer = state.winner ? getOpponent(state.winner) : null
   const loserMeta = losingPlayer ? PLAYER_META[losingPlayer] : null
+  const wishModeMeta = WISH_MODE_META[state.wishMode]
+  const vaultPreview = getVaultPreview(state)
   const winnerCeremony = state.ceremonyId
     ? CEREMONY_SCENES.find((scene) => scene.id === state.ceremonyId) ?? null
     : null
@@ -234,6 +284,7 @@ function App() {
         : getOpponent(previous.currentPlayer)
       const winner = comboContinues ? null : getWinner(board, nextPlayer)
       const ceremonyId = winner ? pickCeremonySceneId() : null
+      const wishChoice = winner ? pickRandomWishChoice(previous) : null
 
       return {
         ...previous,
@@ -244,6 +295,8 @@ function App() {
         winner,
         ceremonyId,
         ceremonyOpen: Boolean(ceremonyId),
+        selectedWish: wishChoice?.text ?? null,
+        selectedWishSource: wishChoice?.source ?? null,
         history: [
           ...previous.history,
           {
@@ -260,7 +313,11 @@ function App() {
   }
 
   function resetMatch() {
-    setState((previous) => createInitialState(previous.themeId))
+    setState((previous) => ({
+      ...createInitialState(previous.themeId),
+      wishMode: previous.wishMode,
+      customWishes: previous.customWishes,
+    }))
   }
 
   function cycleTheme() {
@@ -300,11 +357,58 @@ function App() {
     }))
   }
 
+  function rerollWish() {
+    setState((previous) => {
+      if (!previous.winner) {
+        return previous
+      }
+
+      const wishChoice = pickRandomWishChoice(previous)
+
+      return {
+        ...previous,
+        selectedWish: wishChoice.text,
+        selectedWishSource: wishChoice.source,
+      }
+    })
+  }
+
+  function setWishMode(mode: WishMode) {
+    setState((previous) => ({
+      ...previous,
+      wishMode: mode,
+    }))
+  }
+
+  function addCustomWish() {
+    const sanitized = sanitizeWish(customWishDraft)
+
+    if (!sanitized) {
+      return
+    }
+
+    setState((previous) => ({
+      ...previous,
+      customWishes: [...previous.customWishes, sanitized],
+    }))
+    setCustomWishDraft('')
+  }
+
+  function removeCustomWish(indexToRemove: number) {
+    setState((previous) => ({
+      ...previous,
+      customWishes: previous.customWishes.filter((_, index) => index !== indexToRemove),
+    }))
+  }
+
   const activeMeta = PLAYER_META[state.currentPlayer]
   const winnerPieces = state.winner ? pieceCounts[state.winner] : 0
   const loserPieces = losingPlayer ? pieceCounts[losingPlayer] : 0
   const winnerKings = state.winner ? kingCounts[state.winner] : 0
   const loserKings = losingPlayer ? kingCounts[losingPlayer] : 0
+  const selectedWishLabel = state.selectedWishSource
+    ? getWishSourceLabel(state.selectedWishSource)
+    : null
 
   return (
     <div
@@ -354,6 +458,19 @@ function App() {
               </div>
             </div>
 
+            {state.selectedWish ? (
+              <div className="wish-reveal">
+                <span className="wish-reveal__label">
+                  Tonight&apos;s dare{selectedWishLabel ? ` · ${selectedWishLabel}` : ''}
+                </span>
+                <strong>{state.selectedWish}</strong>
+                <p>
+                  Проигравший не просто получает roast, а ещё и конкретный challenge
+                  на этот матч.
+                </p>
+              </div>
+            ) : null}
+
             <div className="ceremony-stats">
               <div>
                 <span>Winner pieces</span>
@@ -378,6 +495,9 @@ function App() {
             </div>
 
             <div className="ceremony-actions">
+              <button type="button" className="ghost-button" onClick={rerollWish}>
+                Reroll dare
+              </button>
               <button type="button" className="ghost-button" onClick={dismissCeremony}>
                 Let me breathe
               </button>
@@ -588,6 +708,81 @@ function App() {
           </article>
 
           <article className="insight-card">
+            <p className="panel-label">Dare vault</p>
+            <h3>Loser gets a challenge</h3>
+            <p>{wishModeMeta.description}</p>
+
+            <div className="wish-mode-list">
+              {(['house', 'mixed', 'custom'] as WishMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`wish-mode-button ${
+                    state.wishMode === mode ? 'wish-mode-button--active' : ''
+                  }`}
+                  onClick={() => setWishMode(mode)}
+                >
+                  {WISH_MODE_META[mode].label}
+                </button>
+              ))}
+            </div>
+
+            <div className="wish-pool-stats">
+              <div>
+                <span>House dares</span>
+                <strong>{HOUSE_WISHES.length}</strong>
+              </div>
+              <div>
+                <span>Your dares</span>
+                <strong>{state.customWishes.length}</strong>
+              </div>
+            </div>
+
+            <div className="wish-preview-list">
+              {vaultPreview.map((wish) => (
+                <div key={wish} className="wish-preview-item">
+                  {wish}
+                </div>
+              ))}
+            </div>
+
+            <div className="wish-compose">
+              <textarea
+                className="wish-textarea"
+                rows={3}
+                value={customWishDraft}
+                onChange={(event) => setCustomWishDraft(event.target.value)}
+                placeholder="Например: сними 10-секундную сторис как будто у тебя был masterplan."
+              />
+              <button type="button" className="ghost-button wish-add-button" onClick={addCustomWish}>
+                Add custom dare
+              </button>
+            </div>
+
+            <div className="wish-custom-list">
+              {state.customWishes.length === 0 ? (
+                <p className="empty-state">
+                  Пока здесь пусто. Добавь свои желания, и они смогут выпасть проигравшему.
+                </p>
+              ) : (
+                state.customWishes.map((wish, index) => (
+                  <div key={`${wish}-${index}`} className="wish-custom-item">
+                    <span>{wish}</span>
+                    <button
+                      type="button"
+                      className="wish-remove-button"
+                      onClick={() => removeCustomWish(index)}
+                      aria-label={`Remove custom dare ${index + 1}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+
+          <article className="insight-card">
             <p className="panel-label">Move feed</p>
             <div className="history-list">
               {state.history.length === 0 ? (
@@ -652,6 +847,23 @@ function loadMatchState(): MatchState {
       return fallback
     }
 
+    const customWishes = Array.isArray(parsed.customWishes)
+      ? parsed.customWishes
+          .map((wish) => (typeof wish === 'string' ? sanitizeWish(wish) : ''))
+          .filter(Boolean)
+      : []
+    const wishMode = isWishMode(parsed.wishMode) ? parsed.wishMode : fallback.wishMode
+    const fallbackWishChoice = parsed.winner
+      ? pickRandomWishChoice({ wishMode, customWishes })
+      : null
+    const selectedWish =
+      typeof parsed.selectedWish === 'string' && parsed.selectedWish.trim()
+        ? parsed.selectedWish.trim()
+        : fallbackWishChoice?.text ?? null
+    const selectedWishSource = isWishSource(parsed.selectedWishSource)
+      ? parsed.selectedWishSource
+      : fallbackWishChoice?.source ?? null
+
     return {
       board: parsed.board,
       currentPlayer: parsed.currentPlayer,
@@ -661,6 +873,10 @@ function loadMatchState(): MatchState {
       ceremonyId:
         parsed.ceremonyId ?? (parsed.winner ? pickCeremonySceneId() : null),
       ceremonyOpen: parsed.ceremonyOpen ?? Boolean(parsed.winner),
+      wishMode,
+      customWishes,
+      selectedWish,
+      selectedWishSource,
       history: parsed.history ?? [],
       themeId: parsed.themeId,
     }
@@ -703,6 +919,11 @@ function createCeremonyDemoState(): MatchState | null {
     winner: 'ember',
     ceremonyId,
     ceremonyOpen: true,
+    wishMode: 'mixed',
+    customWishes: ['Запиши эпичную сторис о своем поражении за 10 секунд.'],
+    selectedWish:
+      'Запиши 10-секундную сторис как будто это поражение было частью гениального плана.',
+    selectedWishSource: 'house',
     history: [
       {
         id: 'ember-demo-1',
@@ -798,6 +1019,56 @@ function describeStory(context: {
 function pickCeremonySceneId() {
   const randomIndex = Math.floor(Math.random() * CEREMONY_SCENES.length)
   return CEREMONY_SCENES[randomIndex]?.id ?? CEREMONY_SCENES[0].id
+}
+
+function pickRandomWishChoice(config: Pick<MatchState, 'wishMode' | 'customWishes'>): WishChoice {
+  const customPool = config.customWishes
+    .map((wish) => sanitizeWish(wish))
+    .filter(Boolean)
+    .map((text) => ({ source: 'custom' as const, text }))
+  const housePool = HOUSE_WISHES.map((text) => ({
+    source: 'house' as const,
+    text,
+  }))
+
+  const pool =
+    config.wishMode === 'house'
+      ? housePool
+      : config.wishMode === 'custom'
+        ? (customPool.length > 0 ? customPool : housePool)
+        : [...housePool, ...customPool]
+
+  const safePool = pool.length > 0 ? pool : housePool
+  const randomIndex = Math.floor(Math.random() * safePool.length)
+  return safePool[randomIndex] ?? housePool[0]
+}
+
+function getWishSourceLabel(source: WishSource) {
+  return source === 'custom' ? 'Custom vault' : 'House vault'
+}
+
+function getVaultPreview(state: Pick<MatchState, 'customWishes' | 'wishMode'>) {
+  if (state.wishMode === 'custom' && state.customWishes.length > 0) {
+    return state.customWishes.slice(0, 3)
+  }
+
+  if (state.wishMode === 'mixed' && state.customWishes.length > 0) {
+    return [HOUSE_WISHES[0], state.customWishes[0], HOUSE_WISHES[1]].filter(Boolean)
+  }
+
+  return HOUSE_WISHES.slice(0, 3)
+}
+
+function sanitizeWish(value: string) {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+function isWishMode(value: unknown): value is WishMode {
+  return value === 'house' || value === 'mixed' || value === 'custom'
+}
+
+function isWishSource(value: unknown): value is WishSource {
+  return value === 'house' || value === 'custom'
 }
 
 export default App

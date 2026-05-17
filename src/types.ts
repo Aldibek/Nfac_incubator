@@ -35,6 +35,9 @@ export interface MoveRecord {
   turn: number
 }
 
+export type WishMode = 'house' | 'mixed' | 'custom'
+export type WishSource = 'house' | 'custom'
+
 export interface MatchState {
   board: Board
   currentPlayer: Player
@@ -43,6 +46,10 @@ export interface MatchState {
   winner: Player | null
   ceremonyId: string | null
   ceremonyOpen: boolean
+  wishMode: WishMode
+  customWishes: string[]
+  selectedWish: string | null
+  selectedWishSource: WishSource | null
   history: MoveRecord[]
   themeId: string
 }

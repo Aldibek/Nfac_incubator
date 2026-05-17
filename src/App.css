@@ -159,7 +159,9 @@
 .stat-card strong,
 .theme-button strong,
 .history-row strong,
-.player-card__stats strong {
+.player-card__stats strong,
+.wish-pool-stats strong,
+.wish-reveal strong {
   display: block;
   margin-top: 10px;
   font-size: 1.05rem;
@@ -475,6 +477,123 @@
   margin-top: 12px;
 }
 
+.wish-mode-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.wish-mode-button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-main);
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.wish-mode-button:hover,
+.wish-mode-button--active {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wish-pool-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.wish-pool-stats div,
+.wish-preview-item,
+.wish-custom-item {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.wish-pool-stats div {
+  padding: 14px;
+}
+
+.wish-pool-stats span {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.wish-preview-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.wish-preview-item {
+  padding: 12px 14px;
+  color: var(--text-soft);
+}
+
+.wish-compose {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.wish-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 14px;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wish-textarea::placeholder {
+  color: rgba(249, 239, 225, 0.42);
+}
+
+.wish-add-button {
+  justify-self: start;
+}
+
+.wish-custom-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.wish-custom-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.wish-custom-item span {
+  color: var(--text-main);
+}
+
+.wish-remove-button {
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .theme-button {
   display: grid;
   gap: 6px;
@@ -755,6 +874,40 @@
   color: rgba(255, 255, 255, 0.72);
 }
 
+.wish-reveal {
+  position: relative;
+  z-index: 1;
+  margin-top: 18px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid color-mix(in srgb, var(--ceremony-accent) 22%, rgba(255, 255, 255, 0.12));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--ceremony-accent) 12%, transparent), transparent 70%),
+    rgba(255, 255, 255, 0.05);
+}
+
+.wish-reveal__label {
+  display: inline-flex;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.wish-reveal strong {
+  margin-top: 14px;
+  font-size: clamp(1.2rem, 3.4vw, 1.6rem);
+  line-height: 1.24;
+}
+
+.wish-reveal p {
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
 .ceremony-stats {
   position: relative;
   z-index: 1;
@@ -1020,6 +1173,10 @@
   .ceremony-actions {
     flex-direction: column;
   }
+
+  .wish-custom-item {
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1046,6 +1203,19 @@
 
   .toolbar-actions {
     display: grid;
+    width: 100%;
+  }
+
+  .wish-pool-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .wish-mode-list {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .wish-add-button {
     width: 100%;
   }
 

@@ -75,6 +75,10 @@ export function createInitialState(themeId: string): MatchState {
     winner: null,
     ceremonyId: null,
     ceremonyOpen: false,
+    wishMode: 'mixed',
+    customWishes: [],
+    selectedWish: null,
+    selectedWishSource: null,
     history: [],
     themeId,
   }
