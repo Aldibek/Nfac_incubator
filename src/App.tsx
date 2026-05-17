@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { joinRoom } from 'trystero'
 import './App.css'
 import {
   BOARD_SIZE,
@@ -16,9 +17,19 @@ import {
   getWinner,
   isDarkSquare,
 } from './game'
+import {
+  ONLINE_APP_ID,
+  buildOnlineRoomUrl,
+  createOnlineRoomId,
+  getOnlineRoomParams,
+  getOrCreateOnlineClientId,
+  replaceOnlineRoomUrl,
+} from './online'
 import type {
   MatchState,
   MoveOption,
+  OnlineRole,
+  OnlineStatus,
   Player,
   WishMode,
   WishSource,
@@ -163,9 +174,56 @@ interface WishChoice {
   text: string
 }
 
+interface RemoteMovePayload {
+  pieceId: string
+  from: MoveOption['from']
+  to: MoveOption['to']
+}
+
+interface RemoteControlPayload {
+  type: 'request-sync'
+}
+
 function App() {
+  const localClientId = useMemo(() => getOrCreateOnlineClientId(), [])
+  const initialRoomParams = useMemo(() => getOnlineRoomParams(), [])
   const [state, setState] = useState<MatchState>(() => loadMatchState())
   const [customWishDraft, setCustomWishDraft] = useState('')
+  const [{ roomId, ownerId }, setRoomParams] = useState(initialRoomParams)
+  const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>(() =>
+    initialRoomParams.roomId && initialRoomParams.ownerId
+      ? initialRoomParams.ownerId === localClientId
+        ? 'waiting'
+        : 'connecting'
+      : 'offline',
+  )
+  const [connectedPeerIds, setConnectedPeerIds] = useState<string[]>([])
+  const [copyState, setCopyState] = useState<'idle' | 'done' | 'error'>('idle')
+  const [onlineError, setOnlineError] = useState<string | null>(null)
+  const onlineRole: OnlineRole = !roomId || !ownerId
+    ? 'offline'
+    : ownerId === localClientId
+      ? 'host'
+      : 'guest'
+  const localSeat: Player | null =
+    onlineRole === 'host' ? 'ember' : onlineRole === 'guest' ? 'ivory' : null
+  const roomShareUrl = roomId && ownerId ? buildOnlineRoomUrl(roomId, ownerId) : null
+  const roomCode = roomId?.toUpperCase() ?? null
+  const isOnline = onlineRole !== 'offline'
+  const isHost = onlineRole === 'host'
+  const isGuest = onlineRole === 'guest'
+  const canPlayOnline = !isOnline || onlineStatus === 'connected'
+  const canControlBoard =
+    !state.winner &&
+    !state.roundWinner &&
+    (!isOnline || (canPlayOnline && localSeat === state.currentPlayer))
+  const canManageRoomSetup = !isGuest
+
+  const stateRef = useRef(state)
+  const roleRef = useRef<OnlineRole>(onlineRole)
+  const sendStateRef = useRef<null | ((value: MatchState, targetPeer?: string) => Promise<void[]>)>(null)
+  const sendMoveRef = useRef<null | ((value: RemoteMovePayload) => Promise<void[]>)>(null)
+  const sendControlRef = useRef<null | ((value: RemoteControlPayload, targetPeer?: string) => Promise<void[]>)>(null)
 
   const theme = THEMES.find((entry) => entry.id === state.themeId) ?? THEMES[0]
   const availableMoves = useMemo(
@@ -229,13 +287,226 @@ function App() {
   const roundNumber = state.seriesWins.ember + state.seriesWins.ivory + 1
   const liveSeriesScore = `${state.seriesWins.ember}:${state.seriesWins.ivory}`
   const seriesLabel = `First to ${state.seriesTargetWins} win${state.seriesTargetWins > 1 ? 's' : ''}`
+  const onlineStatusText = getOnlineStatusText({
+    onlineRole,
+    onlineStatus,
+    peerCount: connectedPeerIds.length,
+    localSeat,
+    onlineError,
+  })
+
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  useEffect(() => {
+    roleRef.current = onlineRole
+  }, [onlineRole])
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   }, [state])
 
+  useEffect(() => {
+    if (!roomId || !ownerId) {
+      sendStateRef.current = null
+      sendMoveRef.current = null
+      sendControlRef.current = null
+      return
+    }
+
+    const room = joinRoom(
+      {
+        appId: ONLINE_APP_ID,
+        password: ownerId,
+      },
+      roomId,
+      {
+        onJoinError: ({ error }) => {
+          setOnlineStatus('error')
+          setOnlineError(error)
+        },
+      },
+    )
+
+    const peerIds = new Set<string>()
+    const [sendState, getState] = room.makeAction('match-state')
+    const [sendMove, getMove] = room.makeAction('match-move')
+    const [sendControl, getControl] = room.makeAction('match-control')
+
+    sendStateRef.current = (value, targetPeer) =>
+      sendState(JSON.stringify(prepareStateForSync(value)), targetPeer)
+    sendMoveRef.current = (value) => sendMove(JSON.stringify(value))
+    sendControlRef.current = (value, targetPeer) =>
+      sendControl(JSON.stringify(value), targetPeer)
+
+    const refreshPresence = () => {
+      const nextCount = peerIds.size
+      setConnectedPeerIds(Array.from(peerIds))
+
+      if (nextCount === 0) {
+        setOnlineStatus(roleRef.current === 'host' ? 'waiting' : 'connecting')
+        return
+      }
+
+      if (nextCount === 1) {
+        setOnlineStatus('connected')
+        return
+      }
+
+      setOnlineStatus('full')
+    }
+
+    room.onPeerJoin((peerId) => {
+      peerIds.add(peerId)
+      refreshPresence()
+
+      if (roleRef.current === 'host' && sendStateRef.current) {
+        void sendStateRef.current(stateRef.current, peerId)
+      }
+
+      if (roleRef.current === 'guest' && sendControlRef.current) {
+        void sendControlRef.current({ type: 'request-sync' }, peerId)
+      }
+    })
+
+    room.onPeerLeave((peerId) => {
+      peerIds.delete(peerId)
+      refreshPresence()
+    })
+
+    getState((incoming) => {
+      if (roleRef.current !== 'guest') {
+        return
+      }
+
+      const parsed = parseNetworkPayload<Partial<MatchState>>(incoming)
+
+      if (!parsed) {
+        return
+      }
+
+      setState(sanitizeIncomingState(parsed))
+    })
+
+    getMove((incoming) => {
+      if (roleRef.current !== 'host') {
+        return
+      }
+
+      const parsed = parseNetworkPayload<RemoteMovePayload>(incoming)
+
+      if (!parsed) {
+        return
+      }
+
+      setState((previous) =>
+        applyRemoteMoveRequest(previous, parsed),
+      )
+    })
+
+    getControl((incoming, peerId) => {
+      if (roleRef.current !== 'host') {
+        return
+      }
+
+      const parsed = parseNetworkPayload<RemoteControlPayload>(incoming)
+
+      if (parsed?.type === 'request-sync' && sendStateRef.current) {
+        void sendStateRef.current(stateRef.current, peerId)
+      }
+    })
+
+    return () => {
+      peerIds.clear()
+      setConnectedPeerIds([])
+      sendStateRef.current = null
+      sendMoveRef.current = null
+      sendControlRef.current = null
+      void room.leave()
+    }
+  }, [roomId, ownerId, isHost])
+
+  useEffect(() => {
+    if (!isHost || !canPlayOnline || connectedPeerIds.length === 0 || !sendStateRef.current) {
+      return
+    }
+
+    void sendStateRef.current(state)
+  }, [state, isHost, canPlayOnline, connectedPeerIds.length])
+
+  useEffect(() => {
+    if (copyState !== 'done') {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCopyState('idle')
+    }, 1800)
+
+    return () => window.clearTimeout(timeout)
+  }, [copyState])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextParams = getOnlineRoomParams()
+      setRoomParams(nextParams)
+      setConnectedPeerIds([])
+      setOnlineError(null)
+      setOnlineStatus(
+        nextParams.roomId && nextParams.ownerId
+          ? nextParams.ownerId === localClientId
+            ? 'waiting'
+            : 'connecting'
+          : 'offline',
+      )
+    }
+
+    window.addEventListener('popstate', handlePopState)
+
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [localClientId])
+
+  function createFriendLink() {
+    const nextRoomId = createOnlineRoomId()
+    replaceOnlineRoomUrl(nextRoomId, localClientId)
+    setRoomParams({
+      roomId: nextRoomId,
+      ownerId: localClientId,
+    })
+    setOnlineStatus('waiting')
+    setConnectedPeerIds([])
+    setOnlineError(null)
+    setCopyState('idle')
+  }
+
+  function leaveFriendRoom() {
+    replaceOnlineRoomUrl(null, null)
+    setRoomParams({
+      roomId: null,
+      ownerId: null,
+    })
+    setOnlineStatus('offline')
+    setOnlineError(null)
+    setConnectedPeerIds([])
+    setCopyState('idle')
+  }
+
+  async function copyFriendLink() {
+    if (!roomShareUrl) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(roomShareUrl)
+      setCopyState('done')
+    } catch {
+      setCopyState('error')
+    }
+  }
+
   function handleSquareClick(row: number, col: number) {
-    if (state.winner || state.roundWinner) {
+    if (!canControlBoard) {
       return
     }
 
@@ -267,7 +538,7 @@ function App() {
     )
 
     if (chosenMove) {
-      executeMove(chosenMove)
+      submitMove(chosenMove)
       return
     }
 
@@ -279,62 +550,40 @@ function App() {
     }
   }
 
-  function executeMove(move: MoveOption) {
-    setState((previous) => {
-      const { board, crowned, piece } = applyMove(previous.board, move)
-      const followUpMoves = getAvailableMoves(board, previous.currentPlayer, piece.id)
-      const comboContinues =
-        move.captures.length > 0 && countMoves(followUpMoves) > 0
-      const nextPlayer = comboContinues
-        ? previous.currentPlayer
-        : getOpponent(previous.currentPlayer)
-      const roundWinner = comboContinues ? null : getWinner(board, nextPlayer)
-      const seriesWins = roundWinner
-        ? {
-            ...previous.seriesWins,
-            [roundWinner]: previous.seriesWins[roundWinner] + 1,
-          }
-        : previous.seriesWins
-      const winner =
-        roundWinner && seriesWins[roundWinner] >= previous.seriesTargetWins
-          ? roundWinner
-          : null
-      const ceremonyId = winner ? pickCeremonySceneId() : null
-      const wishChoice = winner ? pickRandomWishChoice(previous) : null
-
-      return {
-        ...previous,
-        board,
-        currentPlayer: nextPlayer,
-        selectedPieceId: comboContinues ? piece.id : null,
-        forcedPieceId: comboContinues ? piece.id : null,
-        roundWinner,
-        winner,
-        seriesWins,
-        ceremonyId,
-        ceremonyOpen: Boolean(ceremonyId),
-        selectedWish: wishChoice?.text ?? null,
-        selectedWishSource: wishChoice?.source ?? null,
-        history: [
-          ...previous.history,
-          {
-            id: `${move.pieceId}-${previous.history.length + 1}`,
-            player: previous.currentPlayer,
-            label: formatMoveLabel(move),
-            capture: move.captures.length > 0,
-            crowned,
-            turn: previous.history.length + 1,
-          },
-        ],
+  function submitMove(move: MoveOption) {
+    if (isGuest) {
+      if (!sendMoveRef.current) {
+        return
       }
-    })
+
+      setState((previous) => ({
+        ...previous,
+        selectedPieceId: null,
+      }))
+      void sendMoveRef.current({
+        pieceId: move.pieceId,
+        from: move.from,
+        to: move.to,
+      })
+      return
+    }
+
+    setState((previous) => advanceMatchState(previous, move))
   }
 
   function resetMatch() {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => createFreshSeriesState(previous))
   }
 
   function startNextRound() {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => {
       if (!previous.roundWinner || previous.winner) {
         return previous
@@ -345,6 +594,10 @@ function App() {
   }
 
   function setSeriesTargetWins(targetWins: number) {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => {
       const normalized = clampSeriesTargetWins(targetWins)
 
@@ -357,6 +610,10 @@ function App() {
   }
 
   function cycleTheme() {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => {
       const currentIndex = THEMES.findIndex((entry) => entry.id === previous.themeId)
       const nextTheme = THEMES[(currentIndex + 1) % THEMES.length] ?? THEMES[0]
@@ -369,6 +626,10 @@ function App() {
   }
 
   function selectTheme(themeId: string) {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => ({
       ...previous,
       themeId,
@@ -376,7 +637,7 @@ function App() {
   }
 
   function clearSelection() {
-    if (state.forcedPieceId || state.roundWinner || state.winner) {
+    if (!canControlBoard || state.forcedPieceId || state.roundWinner || state.winner) {
       return
     }
 
@@ -394,6 +655,10 @@ function App() {
   }
 
   function rerollWish() {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => {
       if (!previous.winner) {
         return previous
@@ -410,6 +675,10 @@ function App() {
   }
 
   function setWishMode(mode: WishMode) {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => ({
       ...previous,
       wishMode: mode,
@@ -417,6 +686,10 @@ function App() {
   }
 
   function addCustomWish() {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     const sanitized = sanitizeWish(customWishDraft)
 
     if (!sanitized) {
@@ -431,6 +704,10 @@ function App() {
   }
 
   function removeCustomWish(indexToRemove: number) {
+    if (!canManageRoomSetup) {
+      return
+    }
+
     setState((previous) => ({
       ...previous,
       customWishes: previous.customWishes.filter((_, index) => index !== indexToRemove),
@@ -531,13 +808,23 @@ function App() {
             </div>
 
             <div className="ceremony-actions">
-              <button type="button" className="ghost-button" onClick={rerollWish}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={rerollWish}
+                disabled={!canManageRoomSetup}
+              >
                 Reroll dare
               </button>
               <button type="button" className="ghost-button" onClick={dismissCeremony}>
                 Let me breathe
               </button>
-              <button type="button" className="solid-button" onClick={resetMatch}>
+              <button
+                type="button"
+                className="solid-button"
+                onClick={resetMatch}
+                disabled={!canManageRoomSetup}
+              >
                 Run it back
               </button>
             </div>
@@ -558,9 +845,9 @@ function App() {
           <p className="eyebrow">Checkers, but treated like a real product</p>
           <h1>Crown Lane</h1>
           <p className="hero-text">
-            Локальная шашечная дуэль для двух игроков на одном экране: с полными
-            базовыми правилами, автосохранением и подачей, которая ощущается не
-            как учебный проект, а как стильный digital-продукт.
+            Шашечная дуэль для друзей: можно играть на одном экране или скинуть
+            ссылку другу и устроить онлайн-серию с полными правилами, желаниями
+            и подачей, которая ощущается как стильный digital-продукт.
           </p>
         </div>
 
@@ -578,7 +865,11 @@ function App() {
           <div className="stat-card">
             <span className="stat-label">Creative angle</span>
             <strong>Fast ritual for friends</strong>
-            <p>Roast animation and random dares only trigger after the whole series.</p>
+            <p>
+              {isOnline
+                ? `${onlineStatusText}. Roast and random dares still trigger only after the full series.`
+                : 'Roast animation and random dares only trigger after the whole series.'}
+            </p>
           </div>
         </div>
       </header>
@@ -662,30 +953,58 @@ function App() {
             <div>
               <p className="panel-label">Board status</p>
               <h2>
-                {state.winner
+                {!canPlayOnline && isOnline
+                  ? isHost
+                    ? 'Waiting for your friend'
+                    : 'Joining the host room'
+                  : state.winner
                   ? `${winnerMeta?.name} wins the series`
                   : state.roundWinner
                     ? `${roundWinnerMeta?.name} locks the round`
-                  : `${activeMeta.name} controls the next move`}
+                    : `${activeMeta.name} controls the next move`}
               </h2>
               <p className="board-toolbar__text">
-                {getStatusText(state, selectedMoves.length, availableMoves.captureOnly)}
+                {getStatusText(state, selectedMoves.length, availableMoves.captureOnly, {
+                  onlineRole,
+                  onlineStatus,
+                  localSeat,
+                })}
               </p>
             </div>
 
             <div className="toolbar-actions">
-              <button type="button" className="ghost-button" onClick={cycleTheme}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={cycleTheme}
+                disabled={!canManageRoomSetup}
+              >
                 Rotate palette
               </button>
-              <button type="button" className="ghost-button" onClick={clearSelection}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={clearSelection}
+                disabled={!canControlBoard}
+              >
                 Clear focus
               </button>
               {state.roundWinner && !state.winner ? (
-                <button type="button" className="solid-button" onClick={startNextRound}>
+                <button
+                  type="button"
+                  className="solid-button"
+                  onClick={startNextRound}
+                  disabled={!canManageRoomSetup}
+                >
                   Next round
                 </button>
               ) : (
-                <button type="button" className="solid-button" onClick={resetMatch}>
+                <button
+                  type="button"
+                  className="solid-button"
+                  onClick={resetMatch}
+                  disabled={!canManageRoomSetup}
+                >
                   New series
                 </button>
               )}
@@ -743,6 +1062,7 @@ function App() {
                         isForcedSource ? 'square--forced' : ''
                       }`}
                       onClick={() => handleSquareClick(row, col)}
+                      disabled={!canControlBoard}
                     >
                       {col === 0 ? <span className="square-rank">{BOARD_SIZE - row}</span> : null}
                       {row === BOARD_SIZE - 1 ? (
@@ -775,6 +1095,59 @@ function App() {
           </div>
 
           <article className="insight-card">
+            <p className="panel-label">Link duel beta</p>
+            <h3>Play from one shared URL</h3>
+            <p>{onlineStatusText}</p>
+
+            {!isOnline ? (
+              <div className="online-actions">
+                <button type="button" className="solid-button" onClick={createFriendLink}>
+                  Create friend link
+                </button>
+                <p className="online-note">
+                  Сгенерируем комнату, ты скинешь URL другу, и он зайдёт как второй игрок.
+                </p>
+              </div>
+            ) : (
+              <div className="online-room">
+                <div className="online-room__meta">
+                  <div>
+                    <span>Room code</span>
+                    <strong>{roomCode}</strong>
+                  </div>
+                  <div>
+                    <span>Your role</span>
+                    <strong>{isHost ? 'Host · Ember' : 'Guest · Ivory'}</strong>
+                  </div>
+                </div>
+
+                <div className="online-room__linkbox">
+                  <span>{roomShareUrl}</span>
+                </div>
+
+                <div className="online-actions">
+                  <button type="button" className="ghost-button" onClick={copyFriendLink}>
+                    {copyState === 'done'
+                      ? 'Link copied'
+                      : copyState === 'error'
+                        ? 'Copy failed'
+                        : 'Copy link'}
+                  </button>
+                  <button type="button" className="ghost-button" onClick={leaveFriendRoom}>
+                    Leave room
+                  </button>
+                </div>
+
+                <ul className="online-checklist">
+                  <li>{isHost ? 'Ты управляешь настройками серии, темой и challenge vault.' : 'Хост управляет настройками серии, темой и challenge vault.'}</li>
+                  <li>{isHost ? 'Друг зайдёт по ссылке и автоматически получит сторону Ivory.' : 'Ты автоматически играешь за Ivory после входа по ссылке.'}</li>
+                  <li>Комната рассчитана на 2 игроков и синхронизирует ходы в реальном времени.</li>
+                </ul>
+              </div>
+            )}
+          </article>
+
+          <article className="insight-card">
             <p className="panel-label">Visual moods</p>
             <div className="theme-list">
               {THEMES.map((entry) => (
@@ -783,6 +1156,7 @@ function App() {
                   type="button"
                   className={`theme-button ${state.themeId === entry.id ? 'theme-button--active' : ''}`}
                   onClick={() => selectTheme(entry.id)}
+                  disabled={!canManageRoomSetup}
                 >
                   <strong>{entry.label}</strong>
                   <span>{entry.note}</span>
@@ -801,7 +1175,7 @@ function App() {
                 type="button"
                 className="series-step-button"
                 onClick={() => setSeriesTargetWins(state.seriesTargetWins - 1)}
-                disabled={state.seriesTargetWins <= MIN_SERIES_TARGET_WINS}
+                disabled={!canManageRoomSetup || state.seriesTargetWins <= MIN_SERIES_TARGET_WINS}
                 aria-label="Decrease wins needed"
               >
                 -
@@ -817,7 +1191,7 @@ function App() {
                 type="button"
                 className="series-step-button"
                 onClick={() => setSeriesTargetWins(state.seriesTargetWins + 1)}
-                disabled={state.seriesTargetWins >= MAX_SERIES_TARGET_WINS}
+                disabled={!canManageRoomSetup || state.seriesTargetWins >= MAX_SERIES_TARGET_WINS}
                 aria-label="Increase wins needed"
               >
                 +
@@ -833,6 +1207,7 @@ function App() {
                     state.seriesTargetWins === wins ? 'series-preset-button--active' : ''
                   }`}
                   onClick={() => setSeriesTargetWins(wins)}
+                  disabled={!canManageRoomSetup}
                 >
                   {`${wins} win${wins > 1 ? 's' : ''}`}
                 </button>
@@ -854,6 +1229,7 @@ function App() {
                     state.wishMode === mode ? 'wish-mode-button--active' : ''
                   }`}
                   onClick={() => setWishMode(mode)}
+                  disabled={!canManageRoomSetup}
                 >
                   {WISH_MODE_META[mode].label}
                 </button>
@@ -886,8 +1262,14 @@ function App() {
                 value={customWishDraft}
                 onChange={(event) => setCustomWishDraft(event.target.value)}
                 placeholder="Например: сними 10-секундную сторис как будто у тебя был masterplan."
+                disabled={!canManageRoomSetup}
               />
-              <button type="button" className="ghost-button wish-add-button" onClick={addCustomWish}>
+              <button
+                type="button"
+                className="ghost-button wish-add-button"
+                onClick={addCustomWish}
+                disabled={!canManageRoomSetup}
+              >
                 Add custom dare
               </button>
             </div>
@@ -906,6 +1288,7 @@ function App() {
                       className="wish-remove-button"
                       onClick={() => removeCustomWish(index)}
                       aria-label={`Remove custom dare ${index + 1}`}
+                      disabled={!canManageRoomSetup}
                     >
                       Remove
                     </button>
@@ -1037,6 +1420,137 @@ function loadMatchState(): MatchState {
   }
 }
 
+function advanceMatchState(previous: MatchState, move: MoveOption) {
+  const { board, crowned, piece } = applyMove(previous.board, move)
+  const followUpMoves = getAvailableMoves(board, previous.currentPlayer, piece.id)
+  const comboContinues = move.captures.length > 0 && countMoves(followUpMoves) > 0
+  const nextPlayer = comboContinues
+    ? previous.currentPlayer
+    : getOpponent(previous.currentPlayer)
+  const roundWinner = comboContinues ? null : getWinner(board, nextPlayer)
+  const seriesWins = roundWinner
+    ? {
+        ...previous.seriesWins,
+        [roundWinner]: previous.seriesWins[roundWinner] + 1,
+      }
+    : previous.seriesWins
+  const winner =
+    roundWinner && seriesWins[roundWinner] >= previous.seriesTargetWins
+      ? roundWinner
+      : null
+  const ceremonyId = winner ? pickCeremonySceneId() : null
+  const wishChoice = winner ? pickRandomWishChoice(previous) : null
+
+  return {
+    ...previous,
+    board,
+    currentPlayer: nextPlayer,
+    selectedPieceId: comboContinues ? piece.id : null,
+    forcedPieceId: comboContinues ? piece.id : null,
+    roundWinner,
+    winner,
+    seriesWins,
+    ceremonyId,
+    ceremonyOpen: Boolean(ceremonyId),
+    selectedWish: wishChoice?.text ?? null,
+    selectedWishSource: wishChoice?.source ?? null,
+    history: [
+      ...previous.history,
+      {
+        id: `${move.pieceId}-${previous.history.length + 1}`,
+        player: previous.currentPlayer,
+        label: formatMoveLabel(move),
+        capture: move.captures.length > 0,
+        crowned,
+        turn: previous.history.length + 1,
+      },
+    ],
+  }
+}
+
+function applyRemoteMoveRequest(previous: MatchState, incoming: RemoteMovePayload) {
+  if (previous.winner || previous.roundWinner || previous.currentPlayer !== 'ivory') {
+    return previous
+  }
+
+  const availableMoves = getAvailableMoves(
+    previous.board,
+    previous.currentPlayer,
+    previous.forcedPieceId,
+  )
+  const candidateMoves = availableMoves.movesByPiece[incoming.pieceId] ?? []
+  const nextMove = candidateMoves.find(
+    (move) => samePosition(move.from, incoming.from) && samePosition(move.to, incoming.to),
+  )
+
+  return nextMove ? advanceMatchState(previous, nextMove) : previous
+}
+
+function prepareStateForSync(state: MatchState) {
+  return sanitizeIncomingState({
+    ...state,
+    customWishes: state.customWishes.map((wish) => sanitizeWish(wish)).filter(Boolean),
+  })
+}
+
+function sanitizeIncomingState(incoming: Partial<MatchState>): MatchState {
+  const fallback = createInitialState(
+    typeof incoming.themeId === 'string' ? incoming.themeId : THEMES[0].id,
+  )
+
+  if (!incoming.board || !isPlayer(incoming.currentPlayer) || !incoming.themeId) {
+    return fallback
+  }
+
+  const customWishes = Array.isArray(incoming.customWishes)
+    ? incoming.customWishes
+        .map((wish) => (typeof wish === 'string' ? sanitizeWish(wish) : ''))
+        .filter(Boolean)
+    : []
+  const wishMode = isWishMode(incoming.wishMode) ? incoming.wishMode : fallback.wishMode
+  const seriesTargetWins =
+    typeof incoming.seriesTargetWins === 'number'
+      ? clampSeriesTargetWins(incoming.seriesTargetWins)
+      : fallback.seriesTargetWins
+  const seriesWins = normalizeSeriesWins(incoming.seriesWins)
+  const winner = isPlayer(incoming.winner) ? incoming.winner : null
+  const roundWinner = isPlayer(incoming.roundWinner) ? incoming.roundWinner : winner
+  const resolvedSeriesWins =
+    winner && seriesWins.ember === 0 && seriesWins.ivory === 0
+      ? {
+          ...seriesWins,
+          [winner]: seriesTargetWins,
+        }
+      : seriesWins
+  const fallbackWishChoice = winner
+    ? pickRandomWishChoice({ wishMode, customWishes })
+    : null
+
+  return {
+    board: incoming.board,
+    currentPlayer: incoming.currentPlayer,
+    selectedPieceId: incoming.forcedPieceId ?? incoming.selectedPieceId ?? null,
+    forcedPieceId: incoming.forcedPieceId ?? null,
+    roundWinner,
+    winner,
+    seriesTargetWins,
+    seriesWins: resolvedSeriesWins,
+    ceremonyId: incoming.ceremonyId ?? (winner ? pickCeremonySceneId() : null),
+    ceremonyOpen: incoming.ceremonyOpen ?? Boolean(winner),
+    wishMode,
+    customWishes,
+    selectedWish:
+      typeof incoming.selectedWish === 'string' && incoming.selectedWish.trim()
+        ? incoming.selectedWish.trim()
+        : fallbackWishChoice?.text ?? null,
+    selectedWishSource: isWishSource(incoming.selectedWishSource)
+      ? incoming.selectedWishSource
+      : fallbackWishChoice?.source ?? null,
+    history: Array.isArray(incoming.history) ? incoming.history : [],
+    themeId: incoming.themeId,
+  }
+}
+
 function createCeremonyDemoState(): MatchState | null {
   const params = new URLSearchParams(window.location.search)
   const ceremonyId = params.get('ceremony-demo')
@@ -1108,7 +1622,40 @@ function getStatusText(
   state: MatchState,
   selectedMovesCount: number,
   captureOnly: boolean,
+  onlineContext: {
+    onlineRole: OnlineRole
+    onlineStatus: OnlineStatus
+    localSeat: Player | null
+  },
 ): string {
+  if (onlineContext.onlineRole !== 'offline') {
+    if (onlineContext.onlineStatus === 'error') {
+      return 'Онлайн-комната не подключилась. Можно выйти из неё и создать новую ссылку.'
+    }
+
+    if (onlineContext.onlineStatus === 'waiting') {
+      return 'Ссылка уже готова. Ждём, пока второй игрок подключится к комнате.'
+    }
+
+    if (onlineContext.onlineStatus === 'connecting') {
+      return 'Подключаем комнату и ищем второго игрока.'
+    }
+
+    if (onlineContext.onlineStatus === 'full') {
+      return 'В комнате больше двух подключений. Лучше оставить только 2 игроков для стабильной партии.'
+    }
+
+    if (
+      onlineContext.onlineStatus === 'connected' &&
+      onlineContext.localSeat &&
+      state.currentPlayer !== onlineContext.localSeat &&
+      !state.roundWinner &&
+      !state.winner
+    ) {
+      return 'Сейчас ход у друга. Доска синхронизируется автоматически после его действия.'
+    }
+  }
+
   if (state.winner) {
     return 'Серия завершена. Можно закрыть roast-экран или начать новую серию.'
   }
@@ -1181,6 +1728,44 @@ function describeStory(context: {
   }
 
   return 'The duel is balanced for now, so positioning and patience matter more than speed.'
+}
+
+function getOnlineStatusText(context: {
+  onlineRole: OnlineRole
+  onlineStatus: OnlineStatus
+  peerCount: number
+  localSeat: Player | null
+  onlineError: string | null
+}) {
+  if (context.onlineRole === 'offline') {
+    return 'Сейчас открыт локальный режим на одном устройстве.'
+  }
+
+  if (context.onlineStatus === 'error') {
+    return context.onlineError
+      ? `Онлайн-комната не поднялась: ${context.onlineError}.`
+      : 'Онлайн-комната не поднялась. Попробуйте пересоздать ссылку.'
+  }
+
+  if (context.onlineStatus === 'waiting') {
+    return 'Ссылка готова. Осталось только скинуть её другу и дождаться входа.'
+  }
+
+  if (context.onlineStatus === 'connecting') {
+    return context.onlineRole === 'guest'
+      ? 'Открыли ссылку. Ищем хоста и подтягиваем текущее состояние серии.'
+      : 'Комната создаётся и ждёт второго игрока.'
+  }
+
+  if (context.onlineStatus === 'full') {
+    return `В комнате уже ${context.peerCount} подключения. Для стабильной игры лучше оставить только 2.`
+  }
+
+  if (context.localSeat === 'ember') {
+    return 'Друг подключён. Ты играешь за Ember и управляешь настройками комнаты.'
+  }
+
+  return 'Связь установлена. Ты играешь за Ivory, а настройки серии контролирует host.'
 }
 
 function createFreshSeriesState(previous: MatchState, targetWins = previous.seriesTargetWins) {
@@ -1294,6 +1879,22 @@ function getVaultPreview(state: Pick<MatchState, 'customWishes' | 'wishMode'>) {
 
 function sanitizeWish(value: string) {
   return value.trim().replace(/\s+/g, ' ')
+}
+
+function samePosition(left: MoveOption['from'], right: MoveOption['from']) {
+  return left.row === right.row && left.col === right.col
+}
+
+function parseNetworkPayload<T>(value: unknown): T | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  try {
+    return JSON.parse(value) as T
+  } catch {
+    return null
+  }
 }
 
 function isWishMode(value: unknown): value is WishMode {

@@ -37,6 +37,8 @@ export interface MoveRecord {
 
 export type WishMode = 'house' | 'mixed' | 'custom'
 export type WishSource = 'house' | 'custom'
+export type OnlineRole = 'offline' | 'host' | 'guest'
+export type OnlineStatus = 'offline' | 'waiting' | 'connecting' | 'connected' | 'full' | 'error'
 
 export interface MatchState {
   board: Board

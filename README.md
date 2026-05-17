@@ -1,53 +1,76 @@
 # Crown Lane
 
-`Crown Lane` is a modern web app for playing checkers on one screen.  
-The goal of the project was not to build just another plain board, but to package a medium-level technical implementation inside a product that feels stylish, memorable, and presentation-ready.
+`Crown Lane` is a modern checkers web app built as a social product, not just a board.
+
+The idea was to keep the technical side around a strong **medium level**, but push the **creativity, product thinking, and presentation** as far as possible. The result is a stylish checkers experience where friends can either play on one screen or send each other a link and continue the duel online.
 
 ## What I built
 
-- A complete local 2-player checkers experience in React
-- Full basic rules:
+- Full 8x8 checkers rules in React:
   - diagonal movement
   - mandatory captures
-  - multi-capture sequences
+  - multi-capture chains
   - king promotion
   - winner detection
-- Move highlights and forced-capture guidance
-- Match history feed
+- Local 2-player mode on one device
+- Online `duel by link` mode:
+  - create a room
+  - send the URL to a friend
+  - play the same match from two browsers
+- Custom series format:
+  - players choose how many wins are needed
+  - the board resets between rounds
+  - the score of the series stays
+- `Dare vault`:
+  - built-in funny challenges
+  - custom dares written by players
+  - random challenge for the loser after the whole series
+- Cinematic loser ceremony with animated roast screens
+- Move history feed
+- Theme switching
 - Auto-save with `localStorage`
-- Three visual moods for the same game experience
-- Responsive interface for desktop and mobile
+- Responsive layout for desktop and mobile
 
 ## Product idea
 
-Instead of treating checkers like a school assignment, `Crown Lane` frames it as a stylish social ritual for friends, siblings, classmates, or anyone who wants a quick face-to-face duel on one device.
+This is not “just checkers”.
 
-The product angle is simple:
+`Crown Lane` turns the match into a small social ritual:
 
-- make the game easy to start
-- make it pleasant to watch
-- make it feel premium even without backend complexity
+- play face-to-face on one device
+- or send a link and play remotely
+- make the series feel dramatic
+- make losing memorable through roast screens and random dares
 
-## Who it is for
+The product is aimed at friends, classmates, siblings, and casual players who want something more playful and memorable than a plain board.
 
-- Students who want a fast offline game together
-- Casual players who do not need accounts or matchmaking
-- Judges/reviewers who want to see product thinking, not only code
+## Why it is valuable
 
-## Why it has value
+Most beginner checkers projects prove only that the rules work.
 
-Most beginner checkers projects stop at “the board works.”  
-This project tries to go one step further:
+This project tries to prove something bigger:
 
-- better first impression through strong visual direction
-- clearer game flow through move hints and auto-save
-- stronger product identity through theme switching and editorial UI
+- the game logic works correctly
+- the product has a clear personality
+- the experience is designed for replay value
+- the app already hints at a niche: `party checkers with consequences`
 
-It is intentionally built at a **medium technical level**, but pushed hard on **creativity, polish, and product presentation**.
+That makes it feel closer to a real product prototype than to a standard coursework assignment.
+
+## Multiplayer note
+
+The online mode uses browser-based peer-to-peer room syncing, so the app can stay deployed as a static site on GitHub Pages while still supporting `play by link`.
+
+Current room model:
+
+- 1 host
+- 1 guest
+- host controls room setup, theme, and dare settings
+- both players share the same live match state
 
 ## Rules note
 
-This prototype uses a practical 8x8 checkers ruleset:
+This prototype uses a practical 8x8 ruleset:
 
 - regular pieces move diagonally forward
 - captures are mandatory
@@ -61,6 +84,7 @@ This prototype uses a practical 8x8 checkers ruleset:
 - Vite
 - CSS
 - LocalStorage
+- Trystero / WebRTC for link-based multiplayer
 
 ## Run locally
 
@@ -82,12 +106,14 @@ npm run build
 
 ## Why this project fits the brief
 
-The brief asked for a product that stands out, not just a working board.
+The brief asked for a product that stands out instead of repeating what already exists.
 
 `Crown Lane` does that by combining:
 
-- solid medium-level game logic
-- a unique visual identity
-- simple but real product thinking
+- medium-level but complete gameplay logic
+- strong visual identity
+- social mechanics
+- replayable best-of-series flow
+- a unique “loser challenge” angle
 
-It avoids unnecessary technical overengineering while still feeling like something that could grow into a more complete service later.
+It is intentionally not overengineered, but it still feels like something that could grow into a real service.
