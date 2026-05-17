@@ -287,6 +287,21 @@ function App() {
   const roundNumber = state.seriesWins.ember + state.seriesWins.ivory + 1
   const liveSeriesScore = `${state.seriesWins.ember}:${state.seriesWins.ivory}`
   const seriesLabel = `First to ${state.seriesTargetWins} win${state.seriesTargetWins > 1 ? 's' : ''}`
+  const activeMeta = PLAYER_META[state.currentPlayer]
+  const storyHeadline = state.winner
+    ? `${winnerMeta?.name} takes the series`
+    : state.roundWinner
+      ? `${roundWinnerMeta?.name} takes round ${roundNumber - 1}`
+      : `${activeMeta.name} on move`
+  const boardHeadline = !canPlayOnline && isOnline
+    ? isHost
+      ? 'Waiting for your friend'
+      : 'Joining the room'
+    : state.winner
+      ? `${winnerMeta?.name} wins the series`
+      : state.roundWinner
+        ? `${roundWinnerMeta?.name} wins the round`
+        : `${activeMeta.name} moves next`
   const onlineStatusText = getOnlineStatusText({
     onlineRole,
     onlineStatus,
@@ -714,7 +729,6 @@ function App() {
     }))
   }
 
-  const activeMeta = PLAYER_META[state.currentPlayer]
   const winnerPieces = state.winner ? pieceCounts[state.winner] : 0
   const loserPieces = losingPlayer ? pieceCounts[losingPlayer] : 0
   const winnerKings = state.winner ? kingCounts[state.winner] : 0
@@ -929,11 +943,7 @@ function App() {
           <article className="insight-card">
             <p className="panel-label">Storyline</p>
             <h3>
-              {state.winner
-                ? `${winnerMeta?.name} takes the series`
-                : state.roundWinner
-                  ? `${roundWinnerMeta?.name} takes round ${roundNumber - 1}`
-                  : `${activeMeta.name} to move`}
+              {storyHeadline}
             </h3>
             <p>{storyText}</p>
           </article>
@@ -952,17 +962,7 @@ function App() {
           <div className="board-toolbar">
             <div>
               <p className="panel-label">Board status</p>
-              <h2>
-                {!canPlayOnline && isOnline
-                  ? isHost
-                    ? 'Waiting for your friend'
-                    : 'Joining the host room'
-                  : state.winner
-                  ? `${winnerMeta?.name} wins the series`
-                  : state.roundWinner
-                    ? `${roundWinnerMeta?.name} locks the round`
-                    : `${activeMeta.name} controls the next move`}
-              </h2>
+              <h2>{boardHeadline}</h2>
               <p className="board-toolbar__text">
                 {getStatusText(state, selectedMoves.length, availableMoves.captureOnly, {
                   onlineRole,
