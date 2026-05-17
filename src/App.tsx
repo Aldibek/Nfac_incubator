@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import {
   BOARD_SIZE,
+  MAX_SERIES_TARGET_WINS,
+  MIN_SERIES_TARGET_WINS,
   STARTING_PIECES,
   applyMove,
   countMoves,
@@ -212,6 +214,7 @@ function App() {
     ivoryMoves,
   })
 
+  const roundWinnerMeta = state.roundWinner ? PLAYER_META[state.roundWinner] : null
   const winnerMeta = state.winner ? PLAYER_META[state.winner] : null
   const losingPlayer = state.winner ? getOpponent(state.winner) : null
   const loserMeta = losingPlayer ? PLAYER_META[losingPlayer] : null
@@ -223,13 +226,16 @@ function App() {
   const ceremonyIsOpen = Boolean(
     state.ceremonyOpen && state.winner && winnerMeta && loserMeta && winnerCeremony,
   )
+  const roundNumber = state.seriesWins.ember + state.seriesWins.ivory + 1
+  const liveSeriesScore = `${state.seriesWins.ember}:${state.seriesWins.ivory}`
+  const seriesLabel = `First to ${state.seriesTargetWins} win${state.seriesTargetWins > 1 ? 's' : ''}`
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   }, [state])
 
   function handleSquareClick(row: number, col: number) {
-    if (state.winner) {
+    if (state.winner || state.roundWinner) {
       return
     }
 
@@ -282,7 +288,17 @@ function App() {
       const nextPlayer = comboContinues
         ? previous.currentPlayer
         : getOpponent(previous.currentPlayer)
-      const winner = comboContinues ? null : getWinner(board, nextPlayer)
+      const roundWinner = comboContinues ? null : getWinner(board, nextPlayer)
+      const seriesWins = roundWinner
+        ? {
+            ...previous.seriesWins,
+            [roundWinner]: previous.seriesWins[roundWinner] + 1,
+          }
+        : previous.seriesWins
+      const winner =
+        roundWinner && seriesWins[roundWinner] >= previous.seriesTargetWins
+          ? roundWinner
+          : null
       const ceremonyId = winner ? pickCeremonySceneId() : null
       const wishChoice = winner ? pickRandomWishChoice(previous) : null
 
@@ -292,7 +308,9 @@ function App() {
         currentPlayer: nextPlayer,
         selectedPieceId: comboContinues ? piece.id : null,
         forcedPieceId: comboContinues ? piece.id : null,
+        roundWinner,
         winner,
+        seriesWins,
         ceremonyId,
         ceremonyOpen: Boolean(ceremonyId),
         selectedWish: wishChoice?.text ?? null,
@@ -313,11 +331,29 @@ function App() {
   }
 
   function resetMatch() {
-    setState((previous) => ({
-      ...createInitialState(previous.themeId),
-      wishMode: previous.wishMode,
-      customWishes: previous.customWishes,
-    }))
+    setState((previous) => createFreshSeriesState(previous))
+  }
+
+  function startNextRound() {
+    setState((previous) => {
+      if (!previous.roundWinner || previous.winner) {
+        return previous
+      }
+
+      return createNextRoundState(previous)
+    })
+  }
+
+  function setSeriesTargetWins(targetWins: number) {
+    setState((previous) => {
+      const normalized = clampSeriesTargetWins(targetWins)
+
+      if (normalized === previous.seriesTargetWins) {
+        return previous
+      }
+
+      return createFreshSeriesState(previous, normalized)
+    })
   }
 
   function cycleTheme() {
@@ -340,7 +376,7 @@ function App() {
   }
 
   function clearSelection() {
-    if (state.forcedPieceId) {
+    if (state.forcedPieceId || state.roundWinner || state.winner) {
       return
     }
 
@@ -466,7 +502,7 @@ function App() {
                 <strong>{state.selectedWish}</strong>
                 <p>
                   Проигравший не просто получает roast, а ещё и конкретный challenge
-                  на этот матч.
+                  на всю серию.
                 </p>
               </div>
             ) : null}
@@ -535,14 +571,14 @@ function App() {
             <p>{pressureLabel}</p>
           </div>
           <div className="stat-card">
-            <span className="stat-label">Live rule</span>
-            <strong>{availableMoves.captureOnly ? 'Capture is mandatory' : 'Free diagonal move'}</strong>
-            <p>Auto-save is active in LocalStorage.</p>
+            <span className="stat-label">Series format</span>
+            <strong>{seriesLabel}</strong>
+            <p>{`Live score ${liveSeriesScore}. Auto-save stays active in LocalStorage.`}</p>
           </div>
           <div className="stat-card">
             <span className="stat-label">Creative angle</span>
             <strong>Fast ritual for friends</strong>
-            <p>Three visual moods turn the same match into different vibes.</p>
+            <p>Roast animation and random dares only trigger after the whole series.</p>
           </div>
         </div>
       </header>
@@ -556,7 +592,8 @@ function App() {
 
           {(['ember', 'ivory'] as Player[]).map((player) => {
             const meta = PLAYER_META[player]
-            const isActive = state.currentPlayer === player && !state.winner
+            const isActive =
+              state.currentPlayer === player && !state.winner && !state.roundWinner
             const hasWon = state.winner === player
             const captured = STARTING_PIECES - pieceCounts[player]
 
@@ -589,13 +626,24 @@ function App() {
                     <strong>{captured}</strong>
                   </div>
                 </div>
+
+                <div className="player-card__series">
+                  <span>Series wins</span>
+                  <strong>{`${state.seriesWins[player]} / ${state.seriesTargetWins}`}</strong>
+                </div>
               </article>
             )
           })}
 
           <article className="insight-card">
             <p className="panel-label">Storyline</p>
-            <h3>{state.winner ? `${winnerMeta?.name} takes the set` : `${activeMeta.name} to move`}</h3>
+            <h3>
+              {state.winner
+                ? `${winnerMeta?.name} takes the series`
+                : state.roundWinner
+                  ? `${roundWinnerMeta?.name} takes round ${roundNumber - 1}`
+                  : `${activeMeta.name} to move`}
+            </h3>
             <p>{storyText}</p>
           </article>
 
@@ -615,7 +663,9 @@ function App() {
               <p className="panel-label">Board status</p>
               <h2>
                 {state.winner
-                  ? `${winnerMeta?.name} wins`
+                  ? `${winnerMeta?.name} wins the series`
+                  : state.roundWinner
+                    ? `${roundWinnerMeta?.name} locks the round`
                   : `${activeMeta.name} controls the next move`}
               </h2>
               <p className="board-toolbar__text">
@@ -630,11 +680,45 @@ function App() {
               <button type="button" className="ghost-button" onClick={clearSelection}>
                 Clear focus
               </button>
-              <button type="button" className="solid-button" onClick={resetMatch}>
-                New match
-              </button>
+              {state.roundWinner && !state.winner ? (
+                <button type="button" className="solid-button" onClick={startNextRound}>
+                  Next round
+                </button>
+              ) : (
+                <button type="button" className="solid-button" onClick={resetMatch}>
+                  New series
+                </button>
+              )}
             </div>
           </div>
+
+          <div className="series-scoreband">
+            <div className="series-scoreband__meta">
+              <span className="panel-label">Series pulse</span>
+              <strong>{seriesLabel}</strong>
+              <p>{`${PLAYER_META.ember.name} ${state.seriesWins.ember} · ${state.seriesWins.ivory} ${PLAYER_META.ivory.name}`}</p>
+            </div>
+            <div className="series-scoreband__score" aria-label="Series score">
+              <span>{state.seriesWins.ember}</span>
+              <span>:</span>
+              <span>{state.seriesWins.ivory}</span>
+            </div>
+          </div>
+
+          {state.roundWinner && !state.winner ? (
+            <div className="round-banner">
+              <div>
+                <span className="panel-label">Round complete</span>
+                <h3>{`${roundWinnerMeta?.name} wins round ${roundNumber - 1}`}</h3>
+                <p>
+                  {`${liveSeriesScore} in the series. Hit Next round to reset the board and keep the running score.`}
+                </p>
+              </div>
+              <button type="button" className="solid-button round-banner__button" onClick={startNextRound}>
+                Start round {roundNumber}
+              </button>
+            </div>
+          ) : null}
 
           <div className="board-frame">
             <div className="board-grid" role="grid" aria-label="Checkers board">
@@ -702,6 +786,55 @@ function App() {
                 >
                   <strong>{entry.label}</strong>
                   <span>{entry.note}</span>
+                </button>
+              ))}
+            </div>
+          </article>
+
+          <article className="insight-card">
+            <p className="panel-label">Series setup</p>
+            <h3>Decide the stakes</h3>
+            <p>Игроки сами выбирают, до скольких побед идёт серия. При смене формата текущая серия начинается заново.</p>
+
+            <div className="series-chooser">
+              <button
+                type="button"
+                className="series-step-button"
+                onClick={() => setSeriesTargetWins(state.seriesTargetWins - 1)}
+                disabled={state.seriesTargetWins <= MIN_SERIES_TARGET_WINS}
+                aria-label="Decrease wins needed"
+              >
+                -
+              </button>
+
+              <div className="series-target-card">
+                <span>First to</span>
+                <strong>{state.seriesTargetWins}</strong>
+                <p>{getSeriesHint(state.seriesTargetWins)}</p>
+              </div>
+
+              <button
+                type="button"
+                className="series-step-button"
+                onClick={() => setSeriesTargetWins(state.seriesTargetWins + 1)}
+                disabled={state.seriesTargetWins >= MAX_SERIES_TARGET_WINS}
+                aria-label="Increase wins needed"
+              >
+                +
+              </button>
+            </div>
+
+            <div className="series-preset-list">
+              {[1, 2, 3, 5].map((wins) => (
+                <button
+                  key={wins}
+                  type="button"
+                  className={`series-preset-button ${
+                    state.seriesTargetWins === wins ? 'series-preset-button--active' : ''
+                  }`}
+                  onClick={() => setSeriesTargetWins(wins)}
+                >
+                  {`${wins} win${wins > 1 ? 's' : ''}`}
                 </button>
               ))}
             </div>
@@ -843,7 +976,7 @@ function loadMatchState(): MatchState {
 
     const parsed = JSON.parse(saved) as Partial<MatchState>
 
-    if (!parsed.board || !parsed.currentPlayer || !parsed.themeId) {
+    if (!parsed.board || !isPlayer(parsed.currentPlayer) || !parsed.themeId) {
       return fallback
     }
 
@@ -853,7 +986,23 @@ function loadMatchState(): MatchState {
           .filter(Boolean)
       : []
     const wishMode = isWishMode(parsed.wishMode) ? parsed.wishMode : fallback.wishMode
-    const fallbackWishChoice = parsed.winner
+    const seriesTargetWins =
+      typeof parsed.seriesTargetWins === 'number'
+        ? clampSeriesTargetWins(parsed.seriesTargetWins)
+        : fallback.seriesTargetWins
+    const seriesWins = normalizeSeriesWins(parsed.seriesWins)
+    const winner = isPlayer(parsed.winner) ? parsed.winner : null
+    const roundWinner = isPlayer(parsed.roundWinner)
+      ? parsed.roundWinner
+      : winner
+    const resolvedSeriesWins =
+      winner && seriesWins.ember === 0 && seriesWins.ivory === 0
+        ? {
+            ...seriesWins,
+            [winner]: seriesTargetWins,
+          }
+        : seriesWins
+    const fallbackWishChoice = winner
       ? pickRandomWishChoice({ wishMode, customWishes })
       : null
     const selectedWish =
@@ -869,10 +1018,13 @@ function loadMatchState(): MatchState {
       currentPlayer: parsed.currentPlayer,
       selectedPieceId: parsed.forcedPieceId ?? parsed.selectedPieceId ?? null,
       forcedPieceId: parsed.forcedPieceId ?? null,
-      winner: parsed.winner ?? null,
+      roundWinner,
+      winner,
+      seriesTargetWins,
+      seriesWins: resolvedSeriesWins,
       ceremonyId:
-        parsed.ceremonyId ?? (parsed.winner ? pickCeremonySceneId() : null),
-      ceremonyOpen: parsed.ceremonyOpen ?? Boolean(parsed.winner),
+        parsed.ceremonyId ?? (winner ? pickCeremonySceneId() : null),
+      ceremonyOpen: parsed.ceremonyOpen ?? Boolean(winner),
       wishMode,
       customWishes,
       selectedWish,
@@ -916,7 +1068,13 @@ function createCeremonyDemoState(): MatchState | null {
     currentPlayer: 'ember',
     selectedPieceId: null,
     forcedPieceId: null,
+    roundWinner: 'ember',
     winner: 'ember',
+    seriesTargetWins: 2,
+    seriesWins: {
+      ember: 2,
+      ivory: 1,
+    },
     ceremonyId,
     ceremonyOpen: true,
     wishMode: 'mixed',
@@ -952,7 +1110,11 @@ function getStatusText(
   captureOnly: boolean,
 ): string {
   if (state.winner) {
-    return 'Нажмите New match, чтобы быстро начать новую партию.'
+    return 'Серия завершена. Можно закрыть roast-экран или начать новую серию.'
+  }
+
+  if (state.roundWinner) {
+    return 'Раунд завершён. Нажмите Next round, чтобы сохранить счёт серии и начать новую доску.'
   }
 
   if (state.forcedPieceId) {
@@ -982,6 +1144,7 @@ function describePressure(emberMoves: number, ivoryMoves: number): string {
 
 function describeStory(context: {
   currentPlayer: Player
+  roundWinner: Player | null
   winner: Player | null
   forcedPieceId: string | null
   pieceCounts: Record<Player, number>
@@ -991,6 +1154,10 @@ function describeStory(context: {
 }) {
   if (context.winner) {
     return `${PLAYER_META[context.winner].name} closes the board with cleaner tempo and better structure.`
+  }
+
+  if (context.roundWinner) {
+    return `${PLAYER_META[context.roundWinner].name} took this round. The board resets next, but the pressure now lives in the series score.`
   }
 
   if (context.forcedPieceId) {
@@ -1014,6 +1181,72 @@ function describeStory(context: {
   }
 
   return 'The duel is balanced for now, so positioning and patience matter more than speed.'
+}
+
+function createFreshSeriesState(previous: MatchState, targetWins = previous.seriesTargetWins) {
+  return {
+    ...createInitialState(previous.themeId),
+    themeId: previous.themeId,
+    wishMode: previous.wishMode,
+    customWishes: previous.customWishes,
+    seriesTargetWins: clampSeriesTargetWins(targetWins),
+  }
+}
+
+function createNextRoundState(previous: MatchState) {
+  return {
+    ...createInitialState(previous.themeId),
+    themeId: previous.themeId,
+    wishMode: previous.wishMode,
+    customWishes: previous.customWishes,
+    seriesTargetWins: previous.seriesTargetWins,
+    seriesWins: previous.seriesWins,
+  }
+}
+
+function clampSeriesTargetWins(value: unknown) {
+  const numericValue =
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.round(value)
+      : MIN_SERIES_TARGET_WINS
+
+  return Math.min(MAX_SERIES_TARGET_WINS, Math.max(MIN_SERIES_TARGET_WINS, numericValue))
+}
+
+function normalizeSeriesWins(value: unknown): Record<Player, number> {
+  const safeWins = {
+    ember: 0,
+    ivory: 0,
+  }
+
+  if (!value || typeof value !== 'object') {
+    return safeWins
+  }
+
+  const candidate = value as Partial<Record<Player, number>>
+
+  for (const player of ['ember', 'ivory'] as const) {
+    const wins = candidate[player]
+    safeWins[player] = typeof wins === 'number' && wins >= 0 ? Math.floor(wins) : 0
+  }
+
+  return safeWins
+}
+
+function getSeriesHint(targetWins: number) {
+  if (targetWins === 1) {
+    return 'Одна партия, быстрый social duel.'
+  }
+
+  if (targetWins === 2) {
+    return 'Best of 3 vibe: коротко, но уже с драмой.'
+  }
+
+  if (targetWins === 3) {
+    return 'Best of 5: больше камбэков и больше ставок.'
+  }
+
+  return 'Длинная серия для друзей, которые хотят больше реваншей.'
 }
 
 function pickCeremonySceneId() {
@@ -1069,6 +1302,10 @@ function isWishMode(value: unknown): value is WishMode {
 
 function isWishSource(value: unknown): value is WishSource {
   return value === 'house' || value === 'custom'
+}
+
+function isPlayer(value: unknown): value is Player {
+  return value === 'ember' || value === 'ivory'
 }
 
 export default App

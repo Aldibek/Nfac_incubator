@@ -10,6 +10,9 @@ import type {
 
 export const BOARD_SIZE = 8
 export const STARTING_PIECES = 12
+export const DEFAULT_SERIES_TARGET_WINS = 2
+export const MIN_SERIES_TARGET_WINS = 1
+export const MAX_SERIES_TARGET_WINS = 7
 
 const SIMPLE_DIRECTIONS: Record<Player, Array<[number, number]>> = {
   ember: [
@@ -72,7 +75,13 @@ export function createInitialState(themeId: string): MatchState {
     currentPlayer: 'ember',
     selectedPieceId: null,
     forcedPieceId: null,
+    roundWinner: null,
     winner: null,
+    seriesTargetWins: DEFAULT_SERIES_TARGET_WINS,
+    seriesWins: {
+      ember: 0,
+      ivory: 0,
+    },
     ceremonyId: null,
     ceremonyOpen: false,
     wishMode: 'mixed',

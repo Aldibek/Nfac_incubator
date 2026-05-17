@@ -43,7 +43,10 @@ export interface MatchState {
   currentPlayer: Player
   selectedPieceId: string | null
   forcedPieceId: string | null
+  roundWinner: Player | null
   winner: Player | null
+  seriesTargetWins: number
+  seriesWins: Record<Player, number>
   ceremonyId: string | null
   ceremonyOpen: boolean
   wishMode: WishMode
